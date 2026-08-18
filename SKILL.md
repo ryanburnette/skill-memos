@@ -3,13 +3,49 @@ name: memos
 description: Read and write notes in the personal Memos instance at memos.ryanburnette.com with the `memo` CLI. Use when asked to save a note, jot something down, look something up in memos, or search past notes.
 ---
 
-Memos is a self-hosted note app at `https://memos.ryanburnette.com`. Use the
-`memo` CLI, which wraps its REST API. It is on PATH in every harness (symlinked
-to `~/bin/memo` by `setup.sh` from `memos/bin/memo` in the dotfiles repo), so it
-works the same from Claude Code, pi, and a plain shell.
+Memos is a self-hosted note app (usememos/memos) at
+`https://memos.ryanburnette.com`. Notes are Markdown with `#hashtag` tags and
+an H1 title, read later through search and one-line snippets. This skill
+drives the instance with the `memo` CLI, a thin POSIX wrapper over its REST
+API that ships in this repo at `bin/memo`. It works the same from Claude Code,
+pi, and a plain shell.
 
 Reach for raw curl only for something `memo` does not cover; see REST fallback
 at the end.
+
+## Setup
+
+The CLI needs to be on PATH and able to reach an API token. Both are one-time
+per machine.
+
+**Path.** In the dotfiles-managed setup, `setup.sh` symlinks this repo's
+`bin/memo` to `~/bin/memo`, and `~/.config/shell/path.sh` prepends `~/bin` to
+`PATH`. On a machine without those dotfiles, do the equivalent by hand:
+
+    ln -sf /path/to/skill-memos/bin/memo ~/bin/memo   # ~/bin must be on PATH
+
+**Token.** `memo` reads a personal access token (PAT) created in the Memos
+web UI under Settings → Access Tokens. It is an admin token with delete rights
+over every note, so never echo or paste it. Store it out of the ambient
+environment so it does not leak into agent tool calls:
+
+    # file (mode 0600) — works headless on macOS and Linux alike
+    install -m 600 /dev/null ~/.config/secrets/memos && $EDITOR ~/.config/secrets/memos
+    # or macOS keychain
+    security add-generic-password -a "$USER" -s memos -w
+
+`memo` resolves the token at runtime: `MEMOS_TOKEN` in the environment if a
+caller set one, otherwise `secret memos`, which reads that file (mode 0600) or
+the OS keychain. The token is deliberately **not** exported into every shell,
+so `echo $MEMOS_TOKEN` is empty in a normal shell and that is correct, not a
+misconfiguration. See Auth for the runtime detail.
+
+Never put the token in `ENV.env`, `env.sh`, or any other sourced file — those
+are exported into every process, agent tool calls included.
+
+**Verify.** `memo whoami` exercises both at once — it prints
+`token ok for https://memos.ryanburnette.com` once the CLI is on PATH and the
+token resolves. Command-not-found means PATH; an auth error means the token.
 
 ## Commands
 
@@ -145,11 +181,11 @@ access, not visibility.
 
 ## Auth
 
-`memo` resolves the token itself: `MEMOS_TOKEN` from the environment if a caller
-set one, otherwise `secret memos`, which reads `~/.config/secrets/memos` (mode
-0600) or the OS keychain. The token is deliberately **not** in the ambient
-environment, so `echo $MEMOS_TOKEN` is empty in a normal shell and that is
-correct, not a misconfiguration. Nothing to set up per session.
+At runtime `memo` resolves the token itself: `MEMOS_TOKEN` from the environment
+if a caller set one, otherwise `secret memos` (see Setup for how to store it).
+The token is deliberately not in the ambient environment, so
+`echo $MEMOS_TOKEN` is empty in a normal shell — that is correct, not a
+misconfiguration. Nothing to set up per session.
 
 Never echo the token or paste it into a message. It is an admin PAT with delete
 rights over every note, which is also why `memo rm` refuses to run unattended
