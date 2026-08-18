@@ -6,7 +6,7 @@
 # subcommand without granting blanket curl access.
 set -eu
 
-g_host=https://memos.ryanburnette.com
+g_host=
 g_base=$g_host/api/v1
 g_token=
 
@@ -67,6 +67,24 @@ fn_token() {
       g_token=$(fn_secret memos)
    fi
    test -n "$g_token" || fn_die "empty memos token"
+}
+
+# Resolve the instance host. MEMOS_HOST in the environment wins so a caller can
+# point at a different instance for one process; otherwise read the per-machine
+# config file. The host is not secret, so it lives under ~/.config/memos, not
+# ~/.config/secrets. Nothing is hardcoded so the script is instance-agnostic.
+fn_host() {
+   g_host=${MEMOS_HOST:-}
+   if test -z "$g_host"; then
+      b_file=$HOME/.config/memos/host
+      if test -r "$b_file"; then
+         g_host=$(cat -- "$b_file")
+      fi
+   fi
+   test -n "$g_host" || fn_die "no Memos host set. Put the instance URL in ~/.config/memos/host (or set MEMOS_HOST for one process), e.g.
+  install -d ~/.config/memos
+  printf '%s\n' https://memos.example.com > ~/.config/memos/host"
+   g_base=$g_host/api/v1
 }
 
 cmd_curl() {
@@ -150,6 +168,7 @@ fn_patch_content() {
 test "$#" -gt 0 || fn_usage
 g_cmd=$1
 shift
+fn_host
 fn_token
 
 case $g_cmd in

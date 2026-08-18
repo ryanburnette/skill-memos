@@ -15,8 +15,19 @@ at the end.
 
 ## Setup
 
-The CLI needs to be on PATH and able to reach an API token. Both are one-time
-per machine.
+The CLI is instance-agnostic: it needs a host to point at, a place on PATH, and
+an API token. All three are one-time per machine.
+
+**Host.** The instance URL is not in the script. `memo` reads it from
+`~/.config/memos/host` (one line, no trailing slash), or from `MEMOS_HOST` for a
+single process:
+
+    install -d ~/.config/memos
+    printf '%s\n' https://memos.example.com > ~/.config/memos/host
+
+The host is not secret, so it lives under `~/.config/memos`, not
+`~/.config/secrets`. In the dotfiles-managed setup this file is created by
+hand per machine; it is not committed.
 
 **Path.** In the dotfiles-managed setup, `setup.sh` symlinks this repo's
 `bin/memo` to `~/bin/memo`, and `~/.config/shell/path.sh` prepends `~/bin` to
@@ -43,9 +54,10 @@ misconfiguration. See Auth for the runtime detail.
 Never put the token in `ENV.env`, `env.sh`, or any other sourced file — those
 are exported into every process, agent tool calls included.
 
-**Verify.** `memo whoami` exercises both at once — it prints
-`token ok for https://memos.ryanburnette.com` once the CLI is on PATH and the
-token resolves. Command-not-found means PATH; an auth error means the token.
+**Verify.** `memo whoami` exercises all three at once — it prints
+`token ok for https://...` once the host resolves, the CLI is on PATH, and the
+token authenticates. Command-not-found means PATH; an auth error means the
+token; a "no Memos host set" error means the host file.
 
 ## Commands
 
