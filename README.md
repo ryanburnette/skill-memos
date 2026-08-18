@@ -1,6 +1,6 @@
 # skill-memos
 
-Read and write notes in a self-hosted Memos instance with the `memo` CLI. Use when asked to save a note, jot something down, look something up in memos, or search past notes.
+Read and write notes in a [Memos](https://usememos.com/) instance with the `memo` CLI. Use when asked to save a note, jot something down, look something up in memos, or search past notes.
 
 ## Usage
 
