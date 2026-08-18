@@ -1,14 +1,13 @@
 ---
 name: memos
-description: Read and write notes in the personal Memos instance at memos.ryanburnette.com with the `memo` CLI. Use when asked to save a note, jot something down, look something up in memos, or search past notes.
+description: Read and write notes in a self-hosted Memos instance with the `memo` CLI. Use when asked to save a note, jot something down, look something up in memos, or search past notes.
 ---
 
-Memos is a self-hosted note app (usememos/memos) at
-`https://memos.ryanburnette.com`. Notes are Markdown with `#hashtag` tags and
-an H1 title, read later through search and one-line snippets. This skill
-drives the instance with the `memo` CLI, a thin POSIX wrapper over its REST
-API that ships in this repo at `bin/memo`. It works the same from Claude Code,
-pi, and a plain shell.
+Memos is a self-hosted note app ([usememos/memos](https://usememos.com)). Notes are Markdown with
+`#hashtag` tags and an H1 title, read later through search and one-line
+snippets. This skill drives any Memos instance with the `memo` CLI, a thin POSIX
+wrapper over its REST API that ships in this repo at `bin/memo`. It works the
+same from Claude Code, pi, and a plain shell.
 
 Reach for raw curl only for something `memo` does not cover; see REST fallback
 at the end.
@@ -169,25 +168,23 @@ The CLI covers create, list, and revoke:
     memo shares <id>              list share tokens and create times
     memo share <id> rm <token>    revoke a share link
 
-The public URL is `https://memos.ryanburnette.com/memos/shares/<token>`. There
-is no GET on an individual share (501); use `memo shares` to recover a token.
-A memo need not be `PUBLIC` to be shared — the share token is what grants
-access, not visibility.
+The public URL is `<host>/memos/shares/<token>`. There is no GET on an
+individual share (501); use `memo shares` to recover a token. A memo need not
+be `PUBLIC` to be shared — the share token is what grants access, not
+visibility.
 
 ## Gotchas
 
-- `PUBLIC` does not mean anonymously readable. Every `/api/v1` read on this
-  instance returns 401 without a token, including a `PUBLIC` memo fetched by
-  its exact id, and `https://memos.ryanburnette.com/memos/<id>` requires
-  sign-in. Sharing is a separate mechanism: share links of the form
-  `/memos/shares/<token>`, created over the API (see Sharing), which can
-  expire. Never tell someone a memo URL is shareable because its visibility is
-  `PUBLIC` — only `/memos/shares/<token>` is.
+- `PUBLIC` does not mean anonymously readable. Every `/api/v1` read on a
+  default Memos instance returns 401 without a token, including a `PUBLIC` memo
+  fetched by its exact id, and `<host>/memos/<id>` requires sign-in. Sharing is
+  a separate mechanism: share links of the form `/memos/shares/<token>`, created
+  over the API (see Sharing), which can expire. Never tell someone a memo URL is
+  shareable because its visibility is `PUBLIC` — only `/memos/shares/<token>` is.
 - Tags come from `#hashtag` text in the body; the `tags` field is read-only
   output. To tag a note, put the hashtag in the content.
-- The human-facing URL is `https://memos.ryanburnette.com/memos/<id>`. Not
-  `/m/<id>`, which returns 200 to curl because the frontend is a SPA, then
-  404s in the browser.
+- The human-facing URL is `<host>/memos/<id>`. Not `/m/<id>`, which returns 200
+  to curl because the frontend is a SPA, then 404s in the browser.
 - Editing replaces the whole body. To change only the title, use `memo title`,
   which swaps the H1 and leaves everything below it byte-identical.
 
@@ -213,7 +210,7 @@ any env file:
 For anything the CLI lacks (comments, reactions, attachments, relations,
 pinning, paging past the first page):
 
-    B=https://memos.ryanburnette.com/api/v1
+    B=$(awk 'END{print $0}' ~/.config/memos/host)/api/v1   # or set MEMOS_HOST
     A="Authorization: Bearer $(secret memos)"
     curl -s -H "$A" "$B/memos/$ID/comments"
     curl -s -X PATCH -H "$A" -H 'Content-Type: application/json' \
