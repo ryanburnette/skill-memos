@@ -28,6 +28,9 @@ Write:
     memo title <id> <text>     set or replace the H1 title, body untouched
     memo edit <id>             replace the body with stdin
     memo rm [-f] <id>          delete; refuses without a tty unless -f
+    memo vis <id> <VIS>        set visibility on an existing memo
+    memo share <id> [-e TIME]  create a share link (-e sets an RFC 3339 expiry)
+    memo share <id> rm <tok>   revoke a share link
 
 IDs are bare (`AJDYGQZKpSfsT8BRQzGU2j`), not the `memos/...` resource name the
 API returns. `memo` strips the prefix if you pass the long form anyway.
@@ -43,8 +46,7 @@ Writing a note is usually a heredoc:
 Visibility defaults to `PRIVATE`. `-v PROTECTED` is signed-in users, `-v PUBLIC`
 is still not anonymous — see Sharing and Gotchas.
 
-The CLI only sets visibility at creation time. To change it on an existing memo,
-use the REST `PATCH` in Visibility below.
+Change an existing memo's visibility with `vis`:
 
 ## Writing a title
 
@@ -95,13 +97,11 @@ instance. `PUBLIC` is **not** anonymous — see Gotchas; a `PUBLIC` memo fetched
 by id still 401s without a token. Visibility is an access-control flag for the
 signed-in audience, not a sharing mechanism.
 
-Change an existing memo's visibility with a `PATCH` (the CLI has no command for
-this):
+Set it at creation with `memo new -v VIS`, or change it on an existing memo:
 
-    B=https://memos.ryanburnette.com/api/v1
-    A="Authorization: Bearer $(secret memos)"
-    curl -s -X PATCH -H "$A" -H 'Content-Type: application/json' \
-      -d '{"visibility":"PUBLIC"}' "$B/memos/$ID?updateMask=visibility"
+    memo vis <id> <PRIVATE|PROTECTED|PUBLIC>
+
+`VIS` must be exactly `PRIVATE`, `PROTECTED`, or `PUBLIC`.
 
 ## Sharing
 
@@ -113,32 +113,18 @@ so anyone holding the URL can read the memo. Treat a share link as outward-
 facing — it exposes the note to anyone who has the URL, and needs explicit
 sign-off before you create one.
 
-The CLI only lists shares (`memo shares <id>`). Create, list, and delete over
-the REST API:
+The CLI covers create, list, and revoke:
 
-    B=https://memos.ryanburnette.com/api/v1
-    A="Authorization: Bearer $(secret memos)"
-
-    # create a share (no expiry)
-    curl -s -X POST -H "$A" -H 'Content-Type: application/json' \
-      -d '{}' "$B/memos/$ID/shares"
-    # => {"name":"memos/<id>/shares/<token>","createTime":"..."}
-
-    # create with an expiry (RFC 3339)
-    curl -s -X POST -H "$A" -H 'Content-Type: application/json' \
-      -d '{"expireTime":"2026-08-19T00:00:00Z"}' "$B/memos/$ID/shares"
-
-    # list
-    curl -s -H "$A" "$B/memos/$ID/shares"
-    # => {"memoShares":[{"name":"...","createTime":"...","expireTime":"..."}]}
-
-    # delete (revoke) a share
-    curl -s -X DELETE -H "$A" "$B/memos/$ID/shares/$TOKEN"   # => 200 {}
+    memo share <id> [-e EXPIRE]   create a share link; prints token to stdout,
+                                  public URL to stderr. -e takes an RFC 3339
+                                  expiry, e.g. 2026-08-19T00:00:00Z
+    memo shares <id>              list share tokens and create times
+    memo share <id> rm <token>    revoke a share link
 
 The public URL is `https://memos.ryanburnette.com/memos/shares/<token>`. There
-is no GET on an individual share (501); use the list to recover a token. A
-memo need not be `PUBLIC` to be shared — the share token is what grants access,
-not visibility.
+is no GET on an individual share (501); use `memo shares` to recover a token.
+A memo need not be `PUBLIC` to be shared — the share token is what grants
+access, not visibility.
 
 ## Gotchas
 

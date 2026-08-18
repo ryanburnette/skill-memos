@@ -1,0 +1,320 @@
+#!/bin/sh
+# memo: CLI for the personal Memos instance, wrapping its REST API.
+# setup.sh symlinks this to ~/bin/memo, and ~/.config/shell/path.sh puts ~/bin
+# on PATH, so it works from fish, zsh, scripts, and agent tool calls alike.
+# Agents use this instead of raw curl so read commands can be allowlisted by
+# subcommand without granting blanket curl access.
+set -eu
+
+g_host=https://memos.ryanburnette.com
+g_base=$g_host/api/v1
+g_token=
+
+fn_die() {
+   echo "memo: $*" >&2
+   exit 1
+}
+
+fn_usage() {
+   cat >&2 << 'EOF'
+usage: memo <command> [args]
+
+read:
+  list [n]              newest n memos (default 20)
+  search <text>         full text search
+  tag <tag>             memos carrying #tag
+  get <id>              print a memo's content
+  shares <id>           share links for a memo
+  whoami                check the token works
+
+write:
+  new [-v VIS] [text]   create a memo; body from args or stdin
+  title <id> <text>     set or replace the H1 title
+  edit <id>             replace body with stdin
+  rm [-f] <id>          delete a memo
+  vis <id> <VIS>        set visibility on an existing memo
+  share <id> [-e TIME]  create a share link; -e sets an RFC 3339 expiry
+  share <id> rm <tok>   revoke a share link
+
+VIS is PRIVATE (default), PROTECTED, or PUBLIC. PUBLIC is not anonymously
+readable; only share links are. A share link is /memos/shares/<token> and is
+readable by anyone holding it, so creating one is outward-facing.
+
+Every memo needs an H1 first line that identifies it without context, because
+memos are read later through search with none of the surrounding conversation.
+EOF
+   exit 2
+}
+
+# Resolve the API token. MEMOS_TOKEN in the environment wins so a caller can
+# override; otherwise ask the secret accessor. The token is deliberately not
+# exported anywhere, so it exists only inside this process.
+fn_secret() {
+   a_name=$1
+   if command -v secret > /dev/null 2>&1; then
+      secret "$a_name"
+   elif test -x "$(dirname -- "$0")/secret"; then
+      # Invoked by full path with ~/bin not on PATH; the sibling symlink is there.
+      "$(dirname -- "$0")/secret" "$a_name"
+   else
+      fn_die "the 'secret' command is not on PATH; run setup.sh"
+   fi
+}
+
+fn_token() {
+   g_token=${MEMOS_TOKEN:-}
+   if test -z "$g_token"; then
+      g_token=$(fn_secret memos)
+   fi
+   test -n "$g_token" || fn_die "empty memos token"
+}
+
+cmd_curl() {
+   curl -sS -H "Authorization: Bearer $g_token" "$@"
+}
+
+# The API answers some errors with HTTP 200 and a .message body, so check the
+# payload rather than the status.
+fn_check() {
+   a_body=$1
+   b_msg=$(printf '%s\n' "$a_body" | jq -r '.message // empty' 2> /dev/null || true)
+   test -z "$b_msg" || fn_die "$b_msg"
+}
+
+fn_id() {
+   a_name=$1
+   printf '%s\n' "${a_name#memos/}"
+}
+
+# One line per memo: id, then title if there is an H1, else a snippet.
+fn_render_list() {
+   a_body=$1
+   printf '%s\n' "$a_body" | jq -r '
+      .memos[]? |
+      [ (.name | sub("^memos/"; "")),
+        ( (.property.title // "") as $t |
+          if $t == "" then ((.snippet // "") | gsub("\n"; " ") | .[0:90]) else $t end )
+      ] | @tsv'
+}
+
+fn_list_filtered() {
+   a_filter=$1
+   a_size=$2
+   b_res=$(cmd_curl --get --data-urlencode "filter=$a_filter" \
+      --data "pageSize=$a_size" "$g_base/memos")
+   fn_check "$b_res"
+   fn_render_list "$b_res"
+}
+
+# Read the body for a write command: remaining args if given, else stdin.
+# Command substitution strips all trailing newlines, which is what we want: a
+# heredoc always ends with one, and repeated edits must not grow the memo.
+fn_body_input() {
+   if test "$#" -gt 0; then
+      printf '%s' "$*"
+   else
+      b_in=$(cat)
+      printf '%s' "$b_in"
+   fi
+}
+
+fn_require_title() {
+   a_content=$1
+   case $a_content in
+      '# '*) ;;
+      *)
+         fn_die "content must start with an H1 title line, e.g.
+  # nassau-pve1 loses its ZFS pool after reboot, fixed by zfs-import-cache.service
+A memo is read later with none of this context, so the title has to name the
+subject and the outcome on its own. See skill:memos, Writing a title."
+         ;;
+   esac
+}
+
+fn_get_content() {
+   a_id=$1
+   b_res=$(cmd_curl "$g_base/memos/$a_id")
+   fn_check "$b_res"
+   printf '%s\n' "$b_res" | jq -r '.content'
+}
+
+fn_patch_content() {
+   a_id=$1
+   a_content=$2
+   b_payload=$(jq -n --arg c "$a_content" '{content: $c}')
+   b_res=$(cmd_curl -X PATCH -H 'Content-Type: application/json' \
+      --data-binary "$b_payload" "$g_base/memos/$a_id")
+   fn_check "$b_res"
+}
+
+test "$#" -gt 0 || fn_usage
+g_cmd=$1
+shift
+fn_token
+
+case $g_cmd in
+   list)
+      g_size=${1:-20}
+      g_res=$(cmd_curl --get --data "pageSize=$g_size" "$g_base/memos")
+      fn_check "$g_res"
+      fn_render_list "$g_res"
+      ;;
+
+   search)
+      test "$#" -gt 0 || fn_usage
+      # jq builds the CEL string so quotes in the term cannot break the filter.
+      g_filter=$(jq -rn --arg t "$*" '"content.contains(" + ($t | tojson) + ")"')
+      fn_list_filtered "$g_filter" 20
+      ;;
+
+   tag)
+      test "$#" -gt 0 || fn_usage
+      g_filter=$(jq -rn --arg t "$1" '"tag in [" + ($t | tojson) + "]"')
+      fn_list_filtered "$g_filter" 50
+      ;;
+
+   get)
+      test "$#" -gt 0 || fn_usage
+      fn_get_content "$(fn_id "$1")"
+      ;;
+
+   shares)
+      test "$#" -gt 0 || fn_usage
+      g_res=$(cmd_curl "$g_base/memos/$(fn_id "$1")/shares")
+      fn_check "$g_res"
+      printf '%s\n' "$g_res" |
+         jq -r '.memoShares[]? | [(.name | sub("^.*/shares/"; "")), .createTime] | @tsv'
+      ;;
+
+   whoami)
+      g_res=$(cmd_curl --get --data 'pageSize=1' "$g_base/memos")
+      fn_check "$g_res"
+      echo "token ok for $g_host"
+      ;;
+
+   new)
+      g_vis=PRIVATE
+      if test "${1:-}" = "-v"; then
+         test "$#" -ge 2 || fn_usage
+         g_vis=$2
+         shift 2
+      fi
+      g_content=$(fn_body_input "$@")
+      test -n "$g_content" || fn_die "empty memo"
+      fn_require_title "$g_content"
+      g_payload=$(jq -n --arg c "$g_content" --arg v "$g_vis" \
+         '{content: $c, visibility: $v}')
+      g_res=$(cmd_curl -X POST -H 'Content-Type: application/json' \
+         --data-binary "$g_payload" "$g_base/memos")
+      fn_check "$g_res"
+      g_id=$(printf '%s\n' "$g_res" | jq -r '.name | sub("^memos/"; "")')
+      echo "$g_id"
+      echo "$g_host/memos/$g_id" >&2
+      ;;
+
+   title)
+      test "$#" -ge 2 || fn_usage
+      g_id=$(fn_id "$1")
+      shift
+      g_title=$*
+      case $g_title in
+         '# '*) ;;
+         *) g_title="# $g_title" ;;
+      esac
+      g_old=$(fn_get_content "$g_id")
+      # Replace an existing H1, otherwise prepend one. Keep the body untouched.
+      case $g_old in
+         '# '*)
+            g_rest=$(printf '%s\n' "$g_old" | tail -n +2)
+            g_new=$(printf '%s\n%s' "$g_title" "$g_rest")
+            ;;
+         *) g_new=$(printf '%s\n\n%s' "$g_title" "$g_old") ;;
+      esac
+      fn_patch_content "$g_id" "$g_new"
+      echo "$g_host/memos/$g_id" >&2
+      ;;
+
+   edit)
+      test "$#" -gt 0 || fn_usage
+      g_id=$(fn_id "$1")
+      shift
+      g_content=$(fn_body_input "$@")
+      test -n "$g_content" || fn_die "empty memo"
+      fn_require_title "$g_content"
+      fn_patch_content "$g_id" "$g_content"
+      echo "$g_host/memos/$g_id" >&2
+      ;;
+
+   rm)
+      g_force=no
+      if test "${1:-}" = "-f"; then
+         g_force=yes
+         shift
+      fi
+      test "$#" -gt 0 || fn_usage
+      g_id=$(fn_id "$1")
+      if test "$g_force" = no; then
+         test -t 0 ||
+            fn_die "refusing to delete $g_id without a terminal to confirm at; pass -f if you mean it"
+         printf '%s\n' "$(fn_get_content "$g_id" | head -n 1)"
+         printf 'delete %s? [y/N] ' "$g_id"
+         read -r g_reply
+         case $g_reply in
+            y | Y) ;;
+            *) fn_die "aborted" ;;
+         esac
+      fi
+      g_res=$(cmd_curl -X DELETE "$g_base/memos/$g_id")
+      fn_check "$g_res"
+      echo "deleted $g_id"
+      ;;
+
+   vis)
+      test "$#" -ge 2 || fn_usage
+      g_id=$(fn_id "$1")
+      g_vis=$2
+      case $g_vis in
+         PRIVATE | PROTECTED | PUBLIC) ;;
+         *) fn_die "visibility must be PRIVATE, PROTECTED, or PUBLIC" ;;
+      esac
+      g_payload=$(jq -n --arg v "$g_vis" '{visibility: $v}')
+      g_res=$(cmd_curl -X PATCH -H 'Content-Type: application/json' \
+         --data-binary "$g_payload" "$g_base/memos/$g_id?updateMask=visibility")
+      fn_check "$g_res"
+      echo "$g_host/memos/$g_id" >&2
+      ;;
+
+   share)
+      test "$#" -ge 1 || fn_usage
+      g_id=$(fn_id "$1")
+      shift
+      if test "${1:-}" = "rm"; then
+         shift
+         test "$#" -ge 1 || fn_usage
+         g_share_tok=$1
+         g_res=$(cmd_curl -X DELETE "$g_base/memos/$g_id/shares/$g_share_tok")
+         fn_check "$g_res"
+         echo "revoked $g_share_tok"
+      else
+         g_expire=
+         if test "${1:-}" = "-e"; then
+            test "$#" -ge 2 || fn_usage
+            g_expire=$2
+         fi
+         if test -n "$g_expire"; then
+            g_payload=$(jq -n --arg e "$g_expire" '{expireTime: $e}')
+         else
+            g_payload='{}'
+         fi
+         g_res=$(cmd_curl -X POST -H 'Content-Type: application/json' \
+            --data-binary "$g_payload" "$g_base/memos/$g_id/shares")
+         fn_check "$g_res"
+         g_share_tok=$(printf '%s\n' "$g_res" | jq -r '.name | sub("^.*/shares/"; "")')
+         echo "$g_share_tok"
+         echo "$g_host/memos/shares/$g_share_tok" >&2
+      fi
+      ;;
+
+   -h | --help | help) fn_usage ;;
+   *) fn_die "unknown command: $g_cmd" ;;
+esac
