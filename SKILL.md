@@ -1,6 +1,6 @@
 ---
 name: memos
-description: Read and write notes in a self-hosted Memos instance with the `memo` CLI. Use when asked to save a note, jot something down, look something up in memos, or search past notes.
+description: Read notes in a self-hosted Memos instance with the `memo` CLI. Write only when the user explicitly asks to create, edit, or delete a memo. Do not write a note as a side effect of another task.
 ---
 
 Memos is a self-hosted note app ([usememos/memos](https://usememos.com)). Notes are Markdown with
@@ -252,7 +252,6 @@ not just the status.
 
 ## Safety
 
-Read freely. Creating a note is fine when asked. Editing or deleting an existing
-note needs explicit confirmation first; there is no undo and the token reaches
-every note in the account. Creating a share link is outward-facing — confirm
-with the user first, since it exposes the note to anyone holding the URL.
+Read freely. Do not create, edit, delete, or share a memo unless the user explicitly asked for that memo operation in the current request. A review, a search, a cron, or saving something so it will be remembered later is not a request. Do not infer one.
+
+Editing or deleting an existing note still needs explicit confirmation first; there is no undo and the token reaches every note in the account. Creating a share link is outward-facing — confirm with the user first, since it exposes the note to anyone holding the URL.
