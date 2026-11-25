@@ -1,6 +1,6 @@
 ---
 name: memos
-description: Read and write notes in a self-hosted Memos instance with the `memo` CLI. Use when asked to save a note, jot something down, look something up in memos, or search past notes.
+description: Read and write notes in a self-hosted Memos instance with the `memo` CLI. Use only when the user explicitly asks to use Memos. Generic requests to remember something, save a note, or search past notes do not activate this skill.
 ---
 
 Memos is a self-hosted note app ([usememos/memos](https://usememos.com)). Notes are Markdown with
